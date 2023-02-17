@@ -1,2 +1,2 @@
-# unarian
-A zig implimentation of https://esolangs.org/wiki/Unarian
+# Unarian
+A zig Implimentation of https://esolangs.org/wiki/Unarian
