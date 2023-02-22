@@ -19,4 +19,10 @@ pub fn main() !void {
     } else if (args.len == 3) { // program, number
         try register.setString(10, args[2]);
     } // else: program, register is inited to 0
+
+    var program_file = try std.fs.cwd().openFile(args[1], .{});
+    defer program_file.close();
+
+    const program = try program_file.readToEndAlloc(allocator, (try program_file.metadata()).size());
+    defer allocator.free(program);
 }
