@@ -25,4 +25,64 @@ pub fn main() !void {
 
     const program = try program_file.readToEndAlloc(allocator, (try program_file.metadata()).size());
     defer allocator.free(program);
+
+    try interpret(&program, &register, allocator);
+}
+
+fn interpret(program: *[]u8, register: *std.math.big.int.Managed, allocator: std.mem.Allocator) !void {
+    var depth: usize = 0;
+
+    _ = allocator;
+    _ = register;
+
+    stripComments(program);
+    var tokens = &std.mem.tokenize(u8, program.*, std.ascii.whitespace);
+
+    while (tokens.next()) |token| {
+        if (depth == 0) {
+            if (std.mem.eql(u8, token, "{")) {
+                return error.UnnamedTopLevelFunction;
+            }
+            if (std.mem.eql(u8, token, "}")) {
+                return error.UnopenedFunction;
+            }
+            if (std.mem.eql(u8, token, "|")) {
+                return error.UnscopedAlternation;
+            }
+            if (std.mem.eql(u8, token, "+")) {
+                return error.UnscopedIncrement;
+            }
+            if (std.mem.eql(u8, token, "-")) {
+                return error.UnscopedDecrement;
+            }
+        }
+    }
+}
+
+fn stripComments(program: *[]u8) void {
+    var in_comment = false;
+
+    for (program) |*byte| {
+        if (byte.* == '#') {
+            in_comment = true;
+        }
+
+        if (in_comment and byte.* != '\n') {
+            byte.* = ' ';
+        } else if (byte.* == '\n') {
+            in_comment = false;
+        }
+    }
+}
+
+fn decrement(register: *std.math.big.int.Managed) std.mem.Allocator.Error!?void {
+    if (register.*.eqZero) {
+        return null;
+    }
+
+    try register.addScalar(register, -1);
+}
+
+fn increment(register: *std.math.big.int.Managed) std.mem.Allocator.Error!void {
+    try register.addScalar(register, 1);
 }
