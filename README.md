@@ -1,2 +1,2 @@
 # Unarian
-A zig Implimentation of https://esolangs.org/wiki/Unarian
+A zig implementation of https://github.com/crb233/unarian
