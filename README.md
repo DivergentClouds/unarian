@@ -4,7 +4,7 @@ A zig implementation of https://github.com/crb233/unarian
 # Repo License
 
 Most of this repo is licensed under the BSD-3 Clause License, see `LICENSE` for details.
-`spec.md` was created by crb233 and is licensed under the MIT license, see below for more details.
+`spec.md` was created by [crb233](https://github.com/crb233) and is licensed under the MIT license, see below for more details.
 
 # `spec.md` License
 MIT License
