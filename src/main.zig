@@ -1,9 +1,5 @@
 const std = @import("std");
 
-comptime {
-    std.testing.refAllDecls(@This());
-}
-
 const ReservedTokens = enum(u8) {
     increment = '+',
     decrement = '-',
@@ -305,7 +301,8 @@ fn readToken(
 fn dropNumber(
     number_stack: *std.ArrayList(std.math.big.int.Managed),
 ) void {
-    var number = number_stack.pop();
+    var number = number_stack.pop() orelse
+        unreachable;
     number.deinit();
 }
 
@@ -341,7 +338,8 @@ fn returnFromFunction(
     call_stack: *std.ArrayList(CallData),
     allocator: std.mem.Allocator,
 ) ExecutionError!?std.fs.File {
-    const call_data = call_stack.pop();
+    const call_data = call_stack.pop() orelse
+        unreachable;
 
     allocator.free(call_data.function_name);
 
@@ -378,6 +376,7 @@ fn scanFunctions(
                     },
                 ) catch {};
             }
+
             if (token.len == 1) {
                 const char_token: ReservedTokens = @enumFromInt(token[0]);
                 switch (char_token) {
