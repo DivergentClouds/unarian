@@ -40,11 +40,12 @@ pub const Kind = enum {
     decrement,
     open_group,
     close_group,
-    alternation,
+    alternate,
     input,
     output,
     stack_trace,
     identifier,
+    invalid,
 };
 
 pub const Token = struct {
@@ -60,6 +61,7 @@ pub const Token = struct {
 pub const ScanError = error{
     UnopenedGroup,
     UnclosedGroup,
+    EmptySource,
 };
 
 const ScanErrorWithPayload = struct {
@@ -116,8 +118,8 @@ pub fn init(allocator: std.mem.Allocator) Scanner {
     };
 }
 
-pub fn deinit(scanner: Scanner) void {
-    scanner.arena.deinit();
+pub fn deinit(scanner: *Scanner) void {
+    scanner.list.deinit(scanner.allocator);
 }
 
 /// returns `scanner.list`
@@ -152,12 +154,24 @@ pub fn scan(
                     scanner.list = .{ .errors = .empty };
                 }
 
-                scanner.list.tokens.appendSlice(
+                scanner.list.errors.appendSlice(
                     scanner.allocator,
                     errors.items,
                 );
             },
         }
+    }
+
+    if (success and scanner.list.tokens.len == 0) {
+        success = false;
+
+        scanner.list.deinit(scanner.allocator);
+        scanner.list = .{ .errors = .empty };
+
+        scanner.list.errors.append(scanner.allocator, .{
+            .payload = scanner.location,
+            .err = ScanError.EmptySource,
+        });
     }
 
     return scanner.list;
@@ -296,7 +310,7 @@ fn scanToken(
                     } };
                 } else scanner.opened_groups -= 1;
             },
-            '|' => token.kind = .alternation,
+            '|' => token.kind = .alternate,
             '?' => token.kind = .input,
             '!' => token.kind = .output,
             '@' => token.kind = .stack_trace,
