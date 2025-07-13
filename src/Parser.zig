@@ -4,12 +4,14 @@ const common = @import("common.zig");
 
 const Parser = @This();
 
-functions: std.StringArrayHashMapUnmanaged(Node),
+functions: Functions,
 called_list: FunctionCallLocations,
 token_iterator: common.ScalarIterator(Scanner.Token),
 arena: std.heap.ArenaAllocator,
 /// must be child of arena
 allocator: std.mem.Allocator,
+
+const Functions = std.StringArrayHashMapUnmanaged(Node);
 
 pub fn format(
     parser: Parser,
@@ -22,7 +24,7 @@ pub fn format(
         try writer.print("{s}:\n", .{entry.key_ptr.*});
 
         const group: []const Node = switch (entry.value_ptr.data) {
-            .group => |grp| grp,
+            .group => |group| group,
             else => return error.Unexpected,
         };
 
@@ -146,6 +148,11 @@ const ParseErrorWithPayload = struct {
     }
 };
 
+pub const FunctionsOrErrors = union(enum) {
+    functions: Functions,
+    errors: []const ParseErrorWithPayload,
+};
+
 pub fn init(
     allocator: std.mem.Allocator,
     tokens: []const Scanner.Token,
@@ -162,7 +169,7 @@ pub fn init(
 
 pub fn parse(
     parser: *Parser,
-) !?[]const ParseErrorWithPayload {
+) std.mem.Allocator.Error!FunctionsOrErrors {
     var errors: std.ArrayListUnmanaged(ParseErrorWithPayload) = .initCapacity(
         parser.allocator,
         16,
@@ -216,6 +223,7 @@ pub fn parse(
 
                 success = false;
 
+                // so that the contents of the group are not treated as top-level
                 _ = try parser.parseGroup();
             },
             // invalid is never scanned, only used internally
@@ -248,13 +256,13 @@ pub fn parse(
     }
 
     if (success)
-        return null;
-
-    return try errors.toOwnedSlice(parser.allocator);
+        return .{ .functions = parser.functions }
+    else
+        return .{ .errors = errors.items };
 }
 
 // asserts previous token was start of group
-fn parseGroup(parser: *Parser) !Node {
+fn parseGroup(parser: *Parser) std.mem.Allocator.Error!Node {
     var nodes: std.ArrayListUnmanaged(Node) = .initCapacity(
         parser.allocator,
         64,
@@ -272,7 +280,7 @@ fn parseGroup(parser: *Parser) !Node {
                 try nodes.append(parser.allocator, inner);
             },
             .close_group => {
-                const result = try nodes.toOwnedSlice(parser.allocator);
+                const result = nodes.items;
 
                 return .{ .data = .{ .group = result } };
             },
@@ -314,7 +322,7 @@ fn parseGroup(parser: *Parser) !Node {
     }
 }
 
-fn missingDefinitions(parser: *Parser) !FunctionCallLocations {
+fn missingDefinitions(parser: *Parser) std.mem.Allocator.Error!FunctionCallLocations {
     var missing: FunctionCallLocations = .empty;
 
     var called_iterator = parser.called_list.iterator();
@@ -331,5 +339,5 @@ fn missingDefinitions(parser: *Parser) !FunctionCallLocations {
     if (missing.items.len == 0)
         return null;
 
-    return try missing.toOwnedSlice(parser.allocator);
+    return missing;
 }
