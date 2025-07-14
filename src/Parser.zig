@@ -8,8 +8,6 @@ functions: Functions,
 called_list: FunctionCallLocations,
 token_iterator: common.ScalarIterator(Scanner.Token),
 arena: std.heap.ArenaAllocator,
-/// must be child of arena
-allocator: std.mem.Allocator,
 
 const Functions = std.StringArrayHashMapUnmanaged(Node);
 
@@ -39,7 +37,7 @@ fn printGroup(
 ) !void {
     for (group) |node| {
         if (std.meta.activeTag(node.data) != .group) {
-            try writer.writeByteNTimes(' ', depth);
+            try writer.writeByteNTimes(' ', depth * 2);
         }
         switch (node.data) {
             .group => |inner_group| try printGroup(inner_group, depth + 1, writer),
@@ -85,7 +83,7 @@ pub const Data = union(Kind) {
     output,
     stack_trace,
 
-    fn toChar(data: Data) ![]const u8 {
+    fn toChar(data: Data) !u8 {
         return switch (data) {
             .call => error.CannotConvertCallToChar,
             .group => error.CannotCovertGroupToChar,
@@ -140,10 +138,10 @@ const ParseErrorWithPayload = struct {
             ParseError.UndefinedFunctionCall => "Attempt to call undefined function",
         }});
 
-        if (value.payload.identifier) |identifier| {
+        if (value.payload.lexeme) |lexeme| {
             try writer.print(
                 \\: {s}
-            , .{identifier});
+            , .{lexeme});
         }
     }
 };
@@ -157,21 +155,23 @@ pub fn init(
     allocator: std.mem.Allocator,
     tokens: []const Scanner.Token,
 ) Parser {
-    const arena: std.heap.ArenaAllocator = .init(allocator);
     return .{
         .functions = .empty,
         .called_list = .empty,
         .token_iterator = .init(tokens),
-        .arena = arena,
-        .allocator = arena.allocator(),
+        .arena = .init(allocator),
     };
+}
+
+pub fn deinit(parser: Parser) void {
+    parser.arena.deinit();
 }
 
 pub fn parse(
     parser: *Parser,
 ) std.mem.Allocator.Error!FunctionsOrErrors {
-    var errors: std.ArrayListUnmanaged(ParseErrorWithPayload) = .initCapacity(
-        parser.allocator,
+    var errors: std.ArrayListUnmanaged(ParseErrorWithPayload) = try .initCapacity(
+        parser.arena.allocator(),
         16,
     );
 
@@ -181,10 +181,10 @@ pub fn parse(
         switch (token.kind) {
             .identifier => {
                 if (parser.functions.get(token.lexeme) != null) {
-                    try errors.append(parser.allocator, .{
+                    try errors.append(parser.arena.allocator(), .{
                         .payload = .{
                             .location = token.location,
-                            .identifier = token.lexeme,
+                            .lexeme = token.lexeme,
                         },
                         .err = ParseError.DuplicateFunctionDefinition,
                     });
@@ -192,32 +192,33 @@ pub fn parse(
                 }
 
                 // parseGroup expects to start after .open_group
-                const next_token = parser.token_iterator.peek() orelse
-                    .invalid;
+                const optional_next_token = parser.token_iterator.peek();
 
-                if (next_token.kind != .open_group) {
-                    try errors.append(parser.allocator, .{
+                if (optional_next_token == null or optional_next_token.?.kind != .open_group) {
+                    try errors.append(parser.arena.allocator(), .{
                         .payload = .{
                             .location = token.location,
-                            .identifier = token.lexeme,
+                            .lexeme = token.lexeme,
                         },
                         .err = ParseError.FunctionWithoutGroup,
                     });
+
+                    success = false;
                 } else {
                     _ = parser.token_iterator.skip();
 
                     const group = try parser.parseGroup();
 
-                    parser.functions.putNoClobber(
-                        parser.allocator,
+                    try parser.functions.putNoClobber(
+                        parser.arena.allocator(),
                         token.lexeme,
                         group,
                     );
                 }
             },
             .open_group => {
-                try errors.append(parser.allocator, .{
-                    .payload = token.location,
+                try errors.append(parser.arena.allocator(), .{
+                    .payload = .{ .location = token.location, .lexeme = token.lexeme },
                     .err = ParseError.UnnamedTopLevelGroup,
                 });
 
@@ -226,24 +227,27 @@ pub fn parse(
                 // so that the contents of the group are not treated as top-level
                 _ = try parser.parseGroup();
             },
-            // invalid is never scanned, only used internally
-            .invalid => unreachable,
             else => {
-                errors.append(parser.allocator, .{ .payload = .{
-                    .location = token.location,
-                    .lexeme = token.lexeme,
-                }, .err = ParseError.InvalidTopLevelToken });
+                try errors.append(parser.arena.allocator(), .{
+                    .payload = .{
+                        .location = token.location,
+                        .lexeme = token.lexeme,
+                    },
+                    .err = ParseError.InvalidTopLevelToken,
+                });
+
+                success = false;
             },
         }
     }
     const missing_funcs = try parser.missingDefinitions();
-    const missing_iterator = missing_funcs.iterator();
+    var missing_iterator = missing_funcs.iterator();
 
     while (missing_iterator.next()) |missing_func| {
         // we want multiple locations in case the programmer made several of the same typo of the name of a defined function
         for (missing_func.value_ptr.items) |location| {
             try errors.append(
-                parser.allocator,
+                parser.arena.allocator(),
                 .{
                     .payload = .{
                         .lexeme = missing_func.key_ptr.*,
@@ -253,6 +257,8 @@ pub fn parse(
                 },
             );
         }
+
+        success = false;
     }
 
     if (success)
@@ -263,63 +269,76 @@ pub fn parse(
 
 // asserts previous token was start of group
 fn parseGroup(parser: *Parser) std.mem.Allocator.Error!Node {
-    var nodes: std.ArrayListUnmanaged(Node) = .initCapacity(
-        parser.allocator,
+    var nodes: std.ArrayListUnmanaged(Node) = try .initCapacity(
+        parser.arena.allocator(),
         64,
     );
 
     while (parser.token_iterator.next()) |token| {
         if (nodes.items.len >= nodes.capacity - 1) {
-            try nodes.ensureUnusedCapacity(parser.allocator, 64);
+            try nodes.ensureUnusedCapacity(parser.arena.allocator(), 64);
         }
 
         switch (token.kind) {
             .open_group => {
                 const inner = try parser.parseGroup();
 
-                try nodes.append(parser.allocator, inner);
+                try nodes.append(parser.arena.allocator(), inner);
             },
             .close_group => {
                 const result = nodes.items;
 
-                return .{ .data = .{ .group = result } };
+                return .{
+                    .data = .{ .group = result },
+                    .location = token.location,
+                };
             },
             .identifier => {
                 if (parser.called_list.get(token.lexeme) == null) {
-                    try parser.called_list.put(parser.allocator, token.lexeme, .empty);
+                    try parser.called_list.put(parser.arena.allocator(), token.lexeme, .empty);
                 }
 
                 // we know the entry is non-null because it was just assigned
-                try parser.called_list.get(token.lexeme).?.append(
-                    parser.allocator,
+                var called_list_entry = parser.called_list.get(token.lexeme).?;
+                try called_list_entry.append(
+                    parser.arena.allocator(),
                     token.location,
                 );
 
-                try nodes.append(parser.allocator, .{
+                try nodes.append(parser.arena.allocator(), .{
                     .data = .{ .call = token.lexeme },
+                    .location = token.location,
                 });
             },
             .increment => nodes.appendAssumeCapacity(.{
                 .data = .increment,
+                .location = token.location,
             }),
             .decrement => nodes.appendAssumeCapacity(.{
                 .data = .decrement,
+                .location = token.location,
             }),
             .alternate => nodes.appendAssumeCapacity(.{
                 .data = .alternate,
+                .location = token.location,
             }),
             .input => nodes.appendAssumeCapacity(.{
                 .data = .input,
+                .location = token.location,
             }),
             .output => nodes.appendAssumeCapacity(.{
                 .data = .output,
+                .location = token.location,
             }),
             .stack_trace => nodes.appendAssumeCapacity(.{
                 .data = .stack_trace,
+                .location = token.location,
             }),
-            .invalid => unreachable,
         }
     }
+
+    // the scanner makes sure all brackets match, and we return on a closing bracket
+    unreachable;
 }
 
 fn missingDefinitions(parser: *Parser) std.mem.Allocator.Error!FunctionCallLocations {
@@ -329,15 +348,12 @@ fn missingDefinitions(parser: *Parser) std.mem.Allocator.Error!FunctionCallLocat
     while (called_iterator.next()) |func| {
         if (parser.functions.get(func.key_ptr.*) == null) {
             try missing.put(
-                parser.allocator,
+                parser.arena.allocator(),
                 func.key_ptr.*,
                 func.value_ptr.*,
             );
         }
     }
-
-    if (missing.items.len == 0)
-        return null;
 
     return missing;
 }

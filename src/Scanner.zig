@@ -45,7 +45,6 @@ pub const Kind = enum {
     output,
     stack_trace,
     identifier,
-    invalid,
 };
 
 pub const Token = struct {
@@ -133,12 +132,17 @@ pub fn scan(
         scanner.opened_groups = 0;
         scanner.location = .start(file_number);
 
-        const list = try scanner.scanFile(file);
+        var list = try scanner.scanFile(file);
+
+        defer switch (list) {
+            .tokens => |*tokens| tokens.deinit(scanner.allocator),
+            .errors => |*errors| errors.deinit(scanner.allocator),
+        };
 
         switch (list) {
             .tokens => |tokens| {
                 if (success) {
-                    scanner.list.tokens.appendSlice(
+                    try scanner.list.tokens.appendSlice(
                         scanner.allocator,
                         tokens.items,
                     );
@@ -154,7 +158,7 @@ pub fn scan(
                     scanner.list = .{ .errors = .empty };
                 }
 
-                scanner.list.errors.appendSlice(
+                try scanner.list.errors.appendSlice(
                     scanner.allocator,
                     errors.items,
                 );
@@ -162,13 +166,13 @@ pub fn scan(
         }
     }
 
-    if (success and scanner.list.tokens.len == 0) {
+    if (success and scanner.list.tokens.items.len == 0) {
         success = false;
 
         scanner.list.deinit(scanner.allocator);
         scanner.list = .{ .errors = .empty };
 
-        scanner.list.errors.append(scanner.allocator, .{
+        try scanner.list.errors.append(scanner.allocator, .{
             .payload = scanner.location,
             .err = ScanError.EmptySource,
         });
@@ -209,9 +213,7 @@ fn scanFile(
                 success = false;
 
                 list.deinit(scanner.allocator);
-                list = .{
-                    .errors = .empty,
-                };
+                list = .{ .errors = .empty };
             }
 
             try list.errors.append(scanner.allocator, err);
@@ -231,7 +233,13 @@ fn scanFile(
             };
         }
 
-        try list.errors.append(scanner.allocator, ScanError.UnclosedGroup);
+        try list.errors.append(
+            scanner.allocator,
+            .{
+                .err = ScanError.UnclosedGroup,
+                .payload = scanner.location,
+            },
+        );
     }
 
     return list;
@@ -240,25 +248,28 @@ fn scanFile(
 fn scanToken(
     scanner: *Scanner,
     file: std.fs.File,
-) !?TokenOrError {
-    const starting_location = scanner.location;
-
-    var lexeme_byte_list: std.ArrayListUnmanaged(u8) = .initCapacity(
+) common.FileError!?TokenOrError {
+    var lexeme_byte_list: std.ArrayListUnmanaged(u8) = try .initCapacity(
         scanner.allocator,
         128,
     );
     defer lexeme_byte_list.deinit(scanner.allocator);
 
-    const first_byte: u8 = while (try readByteOrEof(file)) |byte| byte: {
-        if (std.ascii.isWhitespace(byte)) {
+    const first_byte: u8 = byte: {
+        while (try readByteOrEof(file)) |byte| {
             if (byte == '\n') {
                 scanner.location.newLine();
+                continue;
             }
-        } else {
-            scanner.location.newChar();
-            break :byte byte;
-        }
-    } else return null;
+            if (std.ascii.isWhitespace(byte)) {
+                scanner.location.newChar();
+                continue;
+            } else {
+                break :byte byte;
+            }
+        } else return null;
+    };
+    const starting_location = scanner.location;
 
     token_builder: switch (first_byte) {
         ' ',
@@ -269,13 +280,13 @@ fn scanToken(
         => scanner.location.newChar(),
         '\n' => scanner.location.newLine(),
         '#' => try {
-            scanner.skipComment(file);
-            break :token_builder;
+            try scanner.skipComment(file);
+            return scanner.scanToken(file);
         },
         else => |byte| {
             scanner.location.newChar();
-            lexeme_byte_list.append(scanner.allocator, byte);
-            continue :token_builder readByteOrEof(file) orelse
+            try lexeme_byte_list.append(scanner.allocator, byte);
+            continue :token_builder try readByteOrEof(file) orelse
                 break :token_builder;
         },
     }
@@ -322,18 +333,18 @@ fn scanToken(
 }
 
 fn skipComment(scanner: *Scanner, file: std.fs.File) !void {
-    skip: switch (try scanner.readByteOrEof(file) orelse return) {
+    skip: switch (try readByteOrEof(file) orelse return) {
         '\n' => scanner.location.newLine(),
         else => {
             scanner.location.newChar();
-            continue :skip try scanner.readByteOrEof(file) orelse return;
+            continue :skip try readByteOrEof(file) orelse return;
         },
     }
 }
 
-fn readByteOrEof(file: std.fs.File) !?u8 {
-    file.reader().readByte() catch |err| switch (err) {
+fn readByteOrEof(file: std.fs.File) common.FileError!?u8 {
+    return file.reader().readByte() catch |err| switch (err) {
         error.EndOfStream => return null,
-        else => return err,
+        else => return @errorCast(err),
     };
 }
