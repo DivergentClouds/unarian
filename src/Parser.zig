@@ -9,7 +9,7 @@ called_list: FunctionCallLocations,
 token_iterator: common.ScalarIterator(Scanner.Token),
 arena: std.heap.ArenaAllocator,
 
-const Functions = std.StringArrayHashMapUnmanaged(Node);
+pub const Functions = std.StringArrayHashMapUnmanaged(Node);
 
 pub fn format(
     parser: Parser,

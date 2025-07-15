@@ -61,3 +61,21 @@ pub fn ScalarIterator(comptime T: type) type {
 pub fn scalarIterator(comptime T: type, buffer: []const T) ScalarIterator(T) {
     return .{ .buffer = buffer, .index = 0 };
 }
+
+/// append to an ArrayListUnmanaged, extending capacity by a set amountf needed
+/// asserts that additional_count > 0
+pub fn appendEnsureUnusedCapacity(
+    T: type,
+    list: *std.ArrayListUnmanaged(T),
+    item: T,
+    additional_count: usize,
+    allocator: std.mem.Allocator,
+) !void {
+    std.debug.assert(additional_count > 0);
+
+    if (list.items.len == list.capacity) {
+        try list.ensureUnusedCapacity(allocator, additional_count);
+    }
+
+    list.appendAssumeCapacity(item);
+}

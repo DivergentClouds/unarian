@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const Scanner = @import("Scanner.zig");
 const Parser = @import("Parser.zig");
+const Interpreter = @import("Interpreter.zig");
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -29,7 +30,9 @@ pub fn main() !void {
         defer file_list.deinit(allocator);
     }
 
-    var inital_value: ?u64 = null;
+    var initial_value: ?std.math.big.int.Managed = null;
+    defer if (initial_value) |*value| value.deinit();
+
     var entry_point: ?[]const u8 = null;
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -41,15 +44,14 @@ pub fn main() !void {
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--value")) {
-            if (inital_value != null)
+            if (initial_value != null)
                 return error.TooManyValues;
 
             const value_arg = args.next() orelse
                 return error.MissingValueArg;
 
-            const value = try std.fmt.parseInt(u64, value_arg, 0);
-
-            inital_value = value;
+            initial_value = try .init(allocator);
+            try initial_value.?.setString(10, value_arg);
         } else if (std.mem.eql(u8, arg, "--entry")) {
             if (entry_point != null)
                 return error.TooManyEntryPoints;
@@ -67,21 +69,22 @@ pub fn main() !void {
     if (file_list.items.len == 0)
         return error.NoFilesSpecified;
 
-    const result = try run(
-        inital_value orelse 0,
+    initial_value = initial_value orelse try .init(allocator);
+
+    try run(
+        initial_value.?.toConst(),
         entry_point orelse "main",
         file_list.items,
         allocator,
     );
-    _ = result; // TODO:
 }
 
 fn run(
-    initial_value: u64,
+    initial_value: std.math.big.int.Const,
     entry_point: []const u8,
     files: []const std.fs.File,
     allocator: std.mem.Allocator,
-) !?std.math.big.int.Const {
+) !void {
     const stderr = std.io.getStdErr().writer();
 
     var scanner: Scanner = .init(allocator);
@@ -104,7 +107,7 @@ fn run(
 
     const functions_or_errors = try parser.parse();
 
-    const functions = switch (functions_or_errors) {
+    const functions: Parser.Functions = switch (functions_or_errors) {
         .errors => |parse_errors| {
             for (parse_errors) |err| {
                 try stderr.print("{}\n\n", .{err});
@@ -115,14 +118,12 @@ fn run(
         .functions => |functions| functions,
     };
 
-    // TEMPORARY
-    const stdout = std.io.getStdOut().writer();
+    var interpreter: Interpreter = try .init(
+        initial_value,
+        functions,
+        allocator,
+    );
+    defer interpreter.deinit();
 
-    try stdout.print("{}\n", .{parser});
-    _ = functions;
-
-    _ = initial_value;
-    _ = entry_point;
-
-    return null;
+    try interpreter.interpret(entry_point);
 }
