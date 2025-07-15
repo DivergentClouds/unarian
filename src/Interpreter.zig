@@ -94,7 +94,7 @@ pub fn interpret(
 fn interpretGroup(
     interpreter: *Interpreter,
     group: []const Parser.Node,
-    path_input_count: u64,
+    path_input_count: usize,
     has_printed: *bool,
     group_identifier: GroupIdentifier,
 ) !void {
@@ -185,7 +185,7 @@ fn interpretGroup(
 
 fn input(
     interpreter: *Interpreter,
-    input_count: u64,
+    input_count: usize,
 ) !void {
     std.debug.assert(interpreter.register != null);
     std.debug.assert(interpreter.input_stack.items.len + 1 >= input_count);
@@ -217,6 +217,7 @@ fn input(
     }
 
     interpreter.register.?.deinit();
+    try interpreter.register.?.copy(interpreter.input_stack.items[input_count - 1]);
 }
 
 pub fn output(interpreter: Interpreter) !void {
