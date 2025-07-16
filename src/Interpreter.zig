@@ -237,4 +237,5 @@ fn stackTrace(interpreter: Interpreter) !void {
     while (iterator.next()) |stack_entry| {
         try stderr.print("{}\n", .{stack_entry});
     }
+    try stderr.writeByte('\n');
 }
