@@ -4,8 +4,8 @@ const common = @import("common.zig");
 
 const Interpreter = @This();
 
-/// each block entered gets its own item
-input_stack: std.ArrayListUnmanaged(std.math.big.int.Const),
+input_stack: std.ArrayListUnmanaged(std.math.big.int.Mutable), // toConst does not transfer all limbs
+/// each group entered gets its own item
 call_stack: std.ArrayListUnmanaged(StackEntry), // for stack trace builtin
 register: ?std.math.big.int.Managed,
 functions: Parser.Functions,
@@ -63,9 +63,10 @@ pub fn deinit(interpreter: *Interpreter) void {
     }
     interpreter.call_stack.deinit(interpreter.allocator);
 
-    for (interpreter.input_stack.items) |item| {
-        interpreter.allocator.free(item.limbs);
+    for (interpreter.input_stack.items) |input_item| {
+        interpreter.allocator.free(input_item.limbs);
     }
+
     interpreter.input_stack.deinit(interpreter.allocator);
 
     if (interpreter.register) |*register| {
@@ -213,11 +214,10 @@ fn input(
         errdefer input_number.deinit();
         try input_number.setString(10, line_list.items);
 
-        try interpreter.input_stack.append(interpreter.allocator, input_number.toConst());
+        try interpreter.input_stack.append(interpreter.allocator, input_number.toMutable());
     }
 
-    interpreter.register.?.deinit();
-    try interpreter.register.?.copy(interpreter.input_stack.items[input_count - 1]);
+    try interpreter.register.?.copy(interpreter.input_stack.items[input_count - 1].toConst());
 }
 
 pub fn output(interpreter: Interpreter) !void {
