@@ -4,10 +4,10 @@ const common = @import("common.zig");
 
 const Interpreter = @This();
 
-input_stack: std.ArrayListUnmanaged(std.math.big.int.Mutable), // toConst does not transfer all limbs
+input_stack: std.ArrayListUnmanaged(u64), // toConst does not transfer all limbs
 /// each group entered gets its own item
 call_stack: std.ArrayListUnmanaged(StackEntry), // for stack trace builtin
-register: ?std.math.big.int.Managed,
+register: ?u64,
 functions: Parser.Functions,
 allocator: std.mem.Allocator,
 
@@ -18,7 +18,7 @@ const GroupIdentifier = union(enum) {
 
 const StackEntry = struct {
     group_identifier: GroupIdentifier,
-    initial_value: std.math.big.int.Const,
+    initial_value: u64,
 
     pub fn format(
         entry: StackEntry,
@@ -44,34 +44,22 @@ const StackEntry = struct {
 const capacity: usize = 64;
 
 pub fn init(
-    initial_value: std.math.big.int.Const,
+    initial_value: u64,
     functions: Parser.Functions,
     allocator: std.mem.Allocator,
 ) !Interpreter {
     return .{
         .input_stack = try .initCapacity(allocator, capacity),
         .call_stack = try .initCapacity(allocator, capacity),
-        .register = try initial_value.toManaged(allocator),
+        .register = initial_value,
         .functions = functions,
         .allocator = allocator,
     };
 }
 
 pub fn deinit(interpreter: *Interpreter) void {
-    for (interpreter.call_stack.items) |item| {
-        interpreter.allocator.free(item.initial_value.limbs);
-    }
     interpreter.call_stack.deinit(interpreter.allocator);
-
-    for (interpreter.input_stack.items) |input_item| {
-        interpreter.allocator.free(input_item.limbs);
-    }
-
     interpreter.input_stack.deinit(interpreter.allocator);
-
-    if (interpreter.register) |*register| {
-        register.deinit();
-    }
 }
 
 pub fn interpret(
@@ -105,12 +93,12 @@ fn interpretGroup(
         &interpreter.call_stack,
         .{
             .group_identifier = group_identifier,
-            .initial_value = (try interpreter.register.?.clone()).toConst(),
+            .initial_value = interpreter.register.?,
         },
         capacity,
         interpreter.allocator,
     );
-    defer interpreter.allocator.free(interpreter.call_stack.pop().?.initial_value.limbs);
+    defer _ = interpreter.call_stack.pop();
 
     var input_count = path_input_count;
     var group_index: u64 = 0;
@@ -146,12 +134,11 @@ fn interpretGroup(
 
                     has_printed.* = has_printed.* or inner_printed;
                 },
-                .increment => try interpreter.register.?.addScalar(&interpreter.register.?, 1),
-                .decrement => if (interpreter.register.?.eqlZero()) {
-                    interpreter.register.?.deinit();
+                .increment => interpreter.register.? += 1,
+                .decrement => if (interpreter.register.? == 0) {
                     interpreter.register = null;
                 } else {
-                    try interpreter.register.?.addScalar(&interpreter.register.?, -1);
+                    interpreter.register.? -= 1;
                 },
                 .alternate => break, // skip the remainder of the group
                 .input => {
@@ -173,9 +160,7 @@ fn interpretGroup(
         } else {
             switch (node.data) {
                 .alternate => {
-                    interpreter.register = try .init(interpreter.allocator);
-                    try interpreter.register.?.copy(interpreter.call_stack.getLast().initial_value);
-
+                    interpreter.register = interpreter.call_stack.getLast().initial_value;
                     input_count = path_input_count;
                 },
                 else => {},
@@ -210,21 +195,19 @@ fn input(
             null,
         );
 
-        var input_number: std.math.big.int.Managed = try .init(interpreter.allocator);
-        errdefer input_number.deinit();
-        try input_number.setString(10, line_list.items);
+        const input_number = try std.fmt.parseInt(u64, line_list.items, 0);
 
-        try interpreter.input_stack.append(interpreter.allocator, input_number.toMutable());
+        try interpreter.input_stack.append(interpreter.allocator, input_number);
     }
 
-    try interpreter.register.?.copy(interpreter.input_stack.items[input_count - 1].toConst());
+    interpreter.register = interpreter.input_stack.items[input_count - 1];
 }
 
 pub fn output(interpreter: Interpreter) !void {
     const stdout = std.io.getStdOut().writer();
 
     if (interpreter.register) |register| {
-        try stdout.print("{}\n", .{register});
+        try stdout.print("{d}\n", .{register});
     } else {
         try stdout.print("-\n", .{});
     }

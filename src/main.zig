@@ -30,8 +30,7 @@ pub fn main() !void {
         defer file_list.deinit(allocator);
     }
 
-    var initial_value: ?std.math.big.int.Managed = null;
-    defer if (initial_value) |*value| value.deinit();
+    var initial_value: ?u64 = null;
 
     var entry_point: ?[]const u8 = null;
 
@@ -50,8 +49,7 @@ pub fn main() !void {
             const value_arg = args.next() orelse
                 return error.MissingValueArg;
 
-            initial_value = try .init(allocator);
-            try initial_value.?.setString(10, value_arg);
+            initial_value = try std.fmt.parseInt(u64, value_arg, 10);
         } else if (std.mem.eql(u8, arg, "--entry")) {
             if (entry_point != null)
                 return error.TooManyEntryPoints;
@@ -69,10 +67,10 @@ pub fn main() !void {
     if (file_list.items.len == 0)
         return error.NoFilesSpecified;
 
-    initial_value = initial_value orelse try .init(allocator);
+    initial_value = initial_value orelse 0;
 
     try run(
-        initial_value.?.toConst(),
+        initial_value.?,
         entry_point orelse "main",
         file_list.items,
         allocator,
@@ -80,7 +78,7 @@ pub fn main() !void {
 }
 
 fn run(
-    initial_value: std.math.big.int.Const,
+    initial_value: u64,
     entry_point: []const u8,
     files: []const std.fs.File,
     allocator: std.mem.Allocator,
