@@ -36,12 +36,15 @@ fn printGroup(
     writer: anytype,
 ) !void {
     for (group) |node| {
-        if (std.meta.activeTag(node.data) != .group) {
+        if (std.meta.activeTag(node.data) != .group and
+            std.meta.activeTag(node.data) != .end_group)
+        {
             try writer.writeByteNTimes(' ', depth * 2);
         }
         switch (node.data) {
             .group => |inner_group| try printGroup(inner_group, depth + 1, writer),
             .call => |identifier| try writer.print("{s}\n", .{identifier}),
+            .end_group => {},
             else => try writer.print("{c}\n", .{try node.data.toChar()}),
         }
     }
@@ -68,6 +71,8 @@ pub const Kind = enum {
     input,
     output,
     stack_trace,
+
+    end_group,
 };
 
 pub const Data = union(Kind) {
@@ -83,6 +88,8 @@ pub const Data = union(Kind) {
     output,
     stack_trace,
 
+    end_group,
+
     fn toChar(data: Data) !u8 {
         return switch (data) {
             .call => error.CannotConvertCallToChar,
@@ -94,6 +101,8 @@ pub const Data = union(Kind) {
             .input => '?',
             .output => '!',
             .stack_trace => '@',
+
+            .end_group => error.CannotConvertEndGroupToChar,
         };
     }
 };
@@ -286,6 +295,11 @@ fn parseGroup(parser: *Parser) std.mem.Allocator.Error!Node {
                 try nodes.append(parser.arena.allocator(), inner);
             },
             .close_group => {
+                try nodes.append(parser.arena.allocator(), .{
+                    .data = .end_group,
+                    .location = token.location,
+                });
+
                 const result = nodes.items;
 
                 return .{
