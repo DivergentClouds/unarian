@@ -1,6 +1,10 @@
 # Unarian
 A zig implementation of https://github.com/crb233/unarian
 
+The following changes have been made from `spec.md`
+- The input builtin is as described in [crb233/unarian#5](https://github.com/crb233/unarian/issues/5)
+- The output builtin is as described in [crb233/unarian#5 (comment)](github.com/crb233/unarian/issues/5#issuecomment-3042342827)
+
 # Repo License
 
 Most of this repo is licensed under the BSD-3 Clause License, see `LICENSE` for details.
