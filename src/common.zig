@@ -62,9 +62,10 @@ pub fn scalarIterator(comptime T: type, buffer: []const T) ScalarIterator(T) {
     return .{ .buffer = buffer, .index = 0 };
 }
 
+// inlining causes a noticable speedup
 /// append to an ArrayListUnmanaged, extending capacity by a set amountf needed
 /// asserts that additional_count > 0
-pub fn appendEnsureUnusedCapacity(
+pub inline fn appendEnsureUnusedCapacity(
     T: type,
     list: *std.ArrayListUnmanaged(T),
     item: T,

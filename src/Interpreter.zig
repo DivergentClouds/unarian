@@ -117,15 +117,21 @@ fn interpretInner(
         if (interpreter.register != null) {
             switch (node.data) {
                 .call => |name| {
-                    try interpreter.call_stack.append(interpreter.allocator, .{
-                        .group_identifier = .{ .function_name = name },
-                        .initial_value = interpreter.register.?,
-                        .return_group = current_group,
-                        .return_index = current_index,
-                        .anon_count = anon_count,
-                        .path_has_printed = has_printed,
-                        .path_input_count = input_count,
-                    });
+                    try common.appendEnsureUnusedCapacity(
+                        StackEntry,
+                        &interpreter.call_stack,
+                        .{
+                            .group_identifier = .{ .function_name = name },
+                            .initial_value = interpreter.register.?,
+                            .return_group = current_group,
+                            .return_index = current_index,
+                            .anon_count = anon_count,
+                            .path_has_printed = has_printed,
+                            .path_input_count = input_count,
+                        },
+                        capacity,
+                        interpreter.allocator,
+                    );
 
                     // we have already verified that all referenced functions exist when parsing
                     current_group = interpreter.functions.get(name).?.data.group;
@@ -134,15 +140,21 @@ fn interpretInner(
                     has_printed = false;
                 },
                 .group => |inner_group| {
-                    try interpreter.call_stack.append(interpreter.allocator, .{
-                        .group_identifier = .{ .anon_index = anon_count },
-                        .initial_value = interpreter.register.?,
-                        .return_group = current_group,
-                        .return_index = current_index,
-                        .anon_count = anon_count + 1,
-                        .path_has_printed = has_printed,
-                        .path_input_count = input_count,
-                    });
+                    try common.appendEnsureUnusedCapacity(
+                        StackEntry,
+                        &interpreter.call_stack,
+                        .{
+                            .group_identifier = .{ .anon_index = anon_count },
+                            .initial_value = interpreter.register.?,
+                            .return_group = current_group,
+                            .return_index = current_index,
+                            .anon_count = anon_count + 1,
+                            .path_has_printed = has_printed,
+                            .path_input_count = input_count,
+                        },
+                        capacity,
+                        interpreter.allocator,
+                    );
 
                     current_group = inner_group;
                     current_index = 0;
@@ -241,7 +253,13 @@ fn input(
 
         const input_number = try std.fmt.parseInt(u64, line_list.items, 0);
 
-        try interpreter.input_stack.append(interpreter.allocator, input_number);
+        try common.appendEnsureUnusedCapacity(
+            u64,
+            &interpreter.input_stack,
+            input_number,
+            capacity,
+            interpreter.allocator,
+        );
     }
 
     interpreter.register = interpreter.input_stack.items[input_count - 1];
